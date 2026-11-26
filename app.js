@@ -5,13 +5,6 @@ const authForm = $('#auth-form'), authError = $('#auth-error');
 const modal = $('#event-modal'), eventForm = $('#event-form'), modalError = $('#modal-error');
 const state = { user: null, events: [], month: new Date(), weekAnchor: new Date(), view: 'month', subject: 'all', type: 'all', search: '', nav: 'dashboard' };
 state.month = new Date(); state.month.setDate(1);
-const courses = [
-  { subject:'공학수학 2', professor:'최면송 교수', schedule:['월 14:00','수 13:00'], credits:3, status:'남은 과제 1건', color:'#db6c9a', tint:'#fff0f6' },
-  { subject:'기초전자회로', professor:'정의훈 교수', schedule:['월 16:00','수 15:00'], credits:3, status:'과제 2건 대기', color:'#db8a4f', tint:'#fff5ed' },
-  { subject:'미적분학 2', professor:'김재덕 교수', schedule:['화 14:00','목 13:00'], credits:3, status:'퀴즈 준비하기', color:'#5381d7', tint:'#eff4ff' },
-  { subject:'사회적다양성과공동체', professor:'김효정 교수', schedule:['수 11:00','금 11:00'], credits:2, status:'출석률 100%', color:'#26a38d', tint:'#eaf8f5' },
-  { subject:'인공지능입문', professor:'오영석 교수', schedule:['목 10:00–12:50'], credits:3, status:'프로젝트 진행중', color:'#7d6bd7', tint:'#f2efff' }
-];
 const fmt = (date, options) => new Intl.DateTimeFormat('ko-KR', options).format(date);
 const localISO = date => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 const fromISO = value => { const [y,m,d] = value.split('-').map(Number); return new Date(y,m-1,d); };
@@ -72,11 +65,11 @@ function filteredEvents({includeCompleted=true}={}) {
   if(state.search){const query=state.search.toLowerCase();items=items.filter(item=>`${item.subject} ${item.title} ${item.type}`.toLowerCase().includes(query));}
   return items.sort((a,b)=>a.date.localeCompare(b.date)||({높음:0,보통:1,낮음:2}[a.priority]-({높음:0,보통:1,낮음:2}[b.priority])));
 }
-function render() { updateFilters(); renderCalendar(); renderCourses(); renderDeadlines(); }
+function render() { updateFilters(); renderCalendar(); renderDeadlines(); }
 function updateFilters() {
   const filter=$('#subject-filter'), previous=state.subject;
   filter.innerHTML='<option value="all">전체 과목</option>';
-  [...new Set([...courses.map(c=>c.subject),...state.events.map(e=>e.subject)])].forEach(subject=>{const option=document.createElement('option');option.value=subject;option.textContent=subject;filter.append(option);});
+  [...new Set(state.events.map(event=>event.subject))].forEach(subject=>{const option=document.createElement('option');option.value=subject;option.textContent=subject;filter.append(option);});
   filter.value=[...filter.options].some(option=>option.value===previous)?previous:'all'; state.subject=filter.value;
 }
 function typeClass(type){return type==='과제'?'assignment':type==='시험'?'exam':'lecture';}
@@ -115,11 +108,6 @@ function renderCalendar() {
   }
 }
 
-function renderCourses(){
-  const grid=$('#course-grid');grid.innerHTML='';
-  for(const course of courses){const related=state.events.filter(item=>item.subject===course.subject&&!item.completed);const card=document.createElement('article');card.className='course-card';card.style.setProperty('--course-color',course.color);card.style.background=`linear-gradient(125deg, ${course.tint}55 0%, #fff 48%)`;card.innerHTML=`<i class="course-accent"></i><div class="course-title-row"><h3></h3><span class="course-credit">${course.credits}학점</span></div><div class="course-prof"></div><div class="course-schedule"></div><div class="course-bottom"><span></span><span class="course-status"></span></div>`;$('.course-title-row h3',card).textContent=course.subject;$('.course-prof',card).textContent=course.professor;const schedule=$('.course-schedule',card);course.schedule.forEach(text=>{const chip=document.createElement('span');chip.className='schedule-chip';chip.textContent=text;schedule.append(chip);});$('.course-bottom span:first-child',card).textContent=`${course.status}`;$('.course-status',card).textContent=related.length?`${related.length}개 일정`:'수강 중';card.addEventListener('click',()=>{state.subject=course.subject;$('#subject-filter').value=course.subject;state.nav='dashboard';renderCalendar();toast(`${course.subject} 일정만 표시합니다.`);});grid.append(card);}
-  const add=document.createElement('button');add.className='course-add';add.innerHTML='<span class="plus-ring">＋</span><b>LMS 수강 데이터 동기화</b><span>포털 수강신청 변경사항 불러오기</span>';add.addEventListener('click',()=>toast('LMS 자동 연동은 MVP 범위에 포함되지 않습니다.'));grid.append(add);
-}
 function renderDeadlines(){
   const list=$('#deadline-list');list.innerHTML='';
   let items=state.events.filter(item=>item.type!=='강의').sort((a,b)=>dayDelta(a.date)-dayDelta(b.date)||({높음:0,보통:1,낮음:2}[a.priority]-({높음:0,보통:1,낮음:2}[b.priority]))).slice(0,4);
@@ -166,7 +154,6 @@ $('#mobile-menu').addEventListener('click',()=>$('#left-nav').classList.toggle('
 $('#quick-form').addEventListener('submit',async event=>{event.preventDefault();const title=$('#quick-input').value.trim();if(!title)return;const tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+1);try{await api('/api/events',{method:'POST',body:JSON.stringify({subject:'기타',title,type:'과제',date:localISO(tomorrow),priority:'보통'})});$('#quick-input').value='';await refreshEvents();toast('빠른 할 일을 추가했습니다.');}catch(error){toast(error.message,true);}});
 $('#view-all-deadlines').addEventListener('click',()=>{$('.nav-item[data-nav="urgent"]').click();});
 $('#timetable-button').addEventListener('click',()=>{$('.segment[data-view="week"]').click();$('#calendar').scrollIntoView({behavior:'smooth',block:'center'});});
-$('#syllabus-button').addEventListener('click',()=>toast('강의계획서 링크는 준비 중입니다.'));
 $('#sync-button').addEventListener('click',()=>toast('LMS 자동 연동은 MVP 범위에 포함되지 않습니다.'));
 
 loadApp().catch(()=>showAuth());
