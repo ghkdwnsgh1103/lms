@@ -1,9 +1,9 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const authScreen = $('#auth-screen'), app = $('#app');
-const authForm = $('#auth-form'), authError = $('#auth-error');
+const app = $('#app');
 const modal = $('#event-modal'), eventForm = $('#event-form'), modalError = $('#modal-error');
-const state = { user: null, events: [], month: new Date(), weekAnchor: new Date(), view: 'month', subject: 'all', type: 'all', search: '', nav: 'dashboard' };
+const STORAGE_KEY = 'campus-planner-events-v1';
+const state = { events: [], month: new Date(), weekAnchor: new Date(), view: 'month', subject: 'all', type: 'all', search: '', nav: 'dashboard' };
 state.month = new Date(); state.month.setDate(1);
 const fmt = (date, options) => new Intl.DateTimeFormat('ko-KR', options).format(date);
 const localISO = date => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -12,48 +12,13 @@ function dayDelta(value) { const today = new Date(); today.setHours(0,0,0,0); co
 function dday(value) { const n=dayDelta(value); return n===0?'D-Day':n>0?`D-${n}`:`D+${Math.abs(n)}`; }
 function dateShort(value) { const date=fromISO(value); return `${date.getMonth()+1}.${String(date.getDate()).padStart(2,'0')} (${['일','월','화','수','목','금','토'][date.getDay()]})`; }
 function toast(message, error=false) { const el=$('#toast'); el.textContent=message; el.classList.toggle('error',error); el.classList.add('show'); clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.classList.remove('show'),2500); }
-async function api(url, options={}) {
-  const response=await fetch(url,{...options,headers:{'content-type':'application/json',...(options.headers||{})},credentials:'same-origin'});
-  let result={}; try { result=await response.json(); } catch {}
-  if (!response.ok) throw new Error(result.error || '요청을 처리하지 못했습니다. 다시 시도해 주세요.');
-  return result;
+function saveEvents() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.events)); }
+function refreshEvents() {
+  try { const saved=JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); state.events=Array.isArray(saved)?saved:[]; }
+  catch { state.events=[]; }
+  render();
 }
-function showAuth() { authScreen.hidden=false; app.hidden=true; }
-function showApp() { authScreen.hidden=true; app.hidden=false; }
-async function loadApp() {
-  const me=await api('/api/me'); state.user=me.user;
-  if (!state.user) { showAuth(); return; }
-  showApp();
-  const nickname=state.user.email.split('@')[0].split(/[._-]/)[0] || '학생';
-  $('#user-name').textContent=nickname; $('#welcome-name').textContent=nickname; $('#avatar').textContent=nickname.slice(0,1).toUpperCase();
-  await refreshEvents();
-}
-async function refreshEvents() { const data=await api('/api/events'); state.events=data.events; render(); }
-
-let registering=false;
-function setAuthMode(value) {
-  registering=value; authError.hidden=true;
-  $('#auth-title').textContent=registering?'캠퍼스 플래너 시작하기':'다시 만나 반가워요';
-  $('#auth-subtitle').textContent=registering?'계정을 만들고 나만의 학기를 정리해 보세요.':'로그인하고 오늘의 학업 일정을 확인하세요.';
-  $('#auth-submit').textContent=registering?'회원가입':'로그인'; $('#auth-switch').textContent=registering?'로그인':'회원가입';
-  $('#switch-copy').textContent=registering?'이미 계정이 있으신가요?':'아직 계정이 없으신가요?';
-  $('#confirm-wrap').hidden=!registering; $('#confirm-password').required=registering;
-  $('#password').autocomplete=registering?'new-password':'current-password';
-}
-$('#auth-switch').addEventListener('click',()=>setAuthMode(!registering));
-$('.password-toggle').addEventListener('click',event=>{const input=$('#password'); const reveal=input.type==='password';input.type=reveal?'text':'password';event.currentTarget.textContent=reveal?'숨김':'보기';});
-authForm.addEventListener('submit',async event=>{
-  event.preventDefault(); authError.hidden=true;
-  const form=new FormData(authForm), payload={email:form.get('email'),password:form.get('password'),confirmPassword:form.get('confirmPassword')};
-  if(registering && (payload.password.length<8||payload.password.length>64)){authError.textContent='비밀번호는 8~64자로 입력해 주세요.';authError.hidden=false;return;}
-  if(registering&&payload.confirmPassword!==payload.password){authError.textContent='비밀번호가 일치하지 않습니다.';authError.hidden=false;return;}
-  const button=$('#auth-submit');button.disabled=true;button.textContent='잠시만요…';
-  try { const result=await api(registering?'/api/auth/register':'/api/auth/login',{method:'POST',body:JSON.stringify(payload)});state.user=result.user;authForm.reset();setAuthMode(false);await loadApp(); }
-  catch(error){authError.textContent=error.message;authError.hidden=false;}
-  finally{button.disabled=false;button.textContent=registering?'회원가입':'로그인';}
-});
-
-$('#logout').addEventListener('click',async()=>{try{await api('/api/auth/logout',{method:'POST'});state.user=null;state.events=[];showAuth();toast('로그아웃했습니다.');}catch(error){toast(error.message,true);}});
+function loadApp() { app.hidden=false; refreshEvents(); }
 
 function filteredEvents({includeCompleted=true}={}) {
   let items=[...state.events];
@@ -113,7 +78,7 @@ function renderDeadlines(){
   let items=state.events.filter(item=>item.type!=='강의').sort((a,b)=>dayDelta(a.date)-dayDelta(b.date)||({높음:0,보통:1,낮음:2}[a.priority]-({높음:0,보통:1,낮음:2}[b.priority]))).slice(0,4);
   $('#deadline-count').textContent=`총 ${state.events.filter(item=>!item.completed&&item.type!=='강의').length}개 남음`;
   if(!items.length){const empty=document.createElement('div');empty.className='empty-calendar';empty.textContent='아직 등록된 마감 일정이 없어요.';list.append(empty);}
-  for(const item of items){const row=document.createElement('div');row.className=`deadline-item${item.completed?' is-complete':''}`;const check=document.createElement('input');check.type='checkbox';check.className='deadline-check';check.checked=item.completed;check.setAttribute('aria-label',`${item.title} 완료 처리`);check.addEventListener('change',async()=>{try{await api(`/api/events/${item.id}`,{method:'PATCH',body:JSON.stringify({completed:check.checked})});await refreshEvents();toast(check.checked?'일정을 완료했어요.':'완료 상태를 해제했어요.');}catch(error){toast(error.message,true);}});const copy=document.createElement('div');copy.className='deadline-copy';const title=document.createElement('b');title.textContent=item.title;const sub=document.createElement('small');sub.textContent=`${item.subject} · ${dateShort(item.date)}${item.priority==='높음'?' · 중요':''}`;copy.append(title,sub);const badge=document.createElement('span');const delta=dayDelta(item.date);badge.className=`dday${delta>0&&delta<=5?' amber':''}${delta>5?' future':''}${item.completed?' done':''}`;badge.textContent=item.completed?'완료':dday(item.date);row.append(check,copy,badge);row.addEventListener('dblclick',()=>openEvent(item));list.append(row);}
+  for(const item of items){const row=document.createElement('div');row.className=`deadline-item${item.completed?' is-complete':''}`;const check=document.createElement('input');check.type='checkbox';check.className='deadline-check';check.checked=item.completed;check.setAttribute('aria-label',`${item.title} 완료 처리`);check.addEventListener('change',()=>{item.completed=check.checked;saveEvents();render();toast(check.checked?'일정을 완료했어요.':'완료 상태를 해제했어요.');});const copy=document.createElement('div');copy.className='deadline-copy';const title=document.createElement('b');title.textContent=item.title;const sub=document.createElement('small');sub.textContent=`${item.subject} · ${dateShort(item.date)}${item.priority==='높음'?' · 중요':''}`;copy.append(title,sub);const badge=document.createElement('span');const delta=dayDelta(item.date);badge.className=`dday${delta>0&&delta<=5?' amber':''}${delta>5?' future':''}${item.completed?' done':''}`;badge.textContent=item.completed?'완료':dday(item.date);row.append(check,copy,badge);row.addEventListener('dblclick',()=>openEvent(item));list.append(row);}
 }
 
 function openModal(item=null, date=localISO(new Date())){
@@ -132,11 +97,11 @@ eventForm.addEventListener('submit',async event=>{
   if(payload.title.length>60){modalError.textContent='일정 제목은 60자 이하로 입력해 주세요.';modalError.hidden=false;return;}
   if(!payload.date){modalError.textContent='올바른 날짜를 선택해 주세요.';modalError.hidden=false;return;}
   const id=$('#event-id').value, button=$('#save-event');button.disabled=true;
-  try{await api(id?`/api/events/${id}`:'/api/events',{method:id?'PATCH':'POST',body:JSON.stringify(payload)});closeModal();await refreshEvents();toast(id?'일정이 수정되었습니다.':'새 일정을 저장했습니다.');}
-  catch(error){modalError.textContent=error.message;modalError.hidden=false;}
-  finally{button.disabled=false;}
+  if(id){const existing=state.events.find(item=>item.id===id);if(existing)Object.assign(existing,payload);}
+  else state.events.push({id:crypto.randomUUID(),...payload,completed:false,createdAt:new Date().toISOString()});
+  saveEvents();closeModal();render();toast(id?'일정이 수정되었습니다.':'새 일정을 저장했습니다.');button.disabled=false;
 });
-$('#delete-event').addEventListener('click',async()=>{const id=$('#event-id').value;if(!id)return;const title=$('#event-title').value;if(!window.confirm(`“${title}” 일정을 삭제하시겠습니까?`))return;try{await api(`/api/events/${id}`,{method:'DELETE'});closeModal();await refreshEvents();toast('일정을 삭제했습니다.');}catch(error){modalError.textContent=error.message;modalError.hidden=false;}});
+$('#delete-event').addEventListener('click',()=>{const id=$('#event-id').value;if(!id)return;const title=$('#event-title').value;if(!window.confirm(`“${title}” 일정을 삭제하시겠습니까?`))return;state.events=state.events.filter(item=>item.id!==id);saveEvents();closeModal();render();toast('일정을 삭제했습니다.');});
 
 function addEventButton(button){button.addEventListener('click',()=>openModal());}
 addEventButton($('#add-event-top'));addEventButton($('#add-event-main'));
@@ -151,9 +116,9 @@ $('#search').addEventListener('input',event=>{state.search=event.target.value.tr
 document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();$('#search').focus();}});
 $$('.nav-item[data-nav]').forEach(button=>button.addEventListener('click',()=>{state.nav=button.dataset.nav;$$('.nav-item').forEach(item=>item.classList.toggle('active',item===button));$('#left-nav').classList.remove('open');if(state.nav==='urgent'){state.type='all';$('#type-filter').value='all';}render();if(state.nav==='urgent')toast('마감이 3일 이내인 과제와 시험을 표시합니다.');if(state.nav==='archive')toast('완료된 일정 보관함');}));
 $('#mobile-menu').addEventListener('click',()=>$('#left-nav').classList.toggle('open'));
-$('#quick-form').addEventListener('submit',async event=>{event.preventDefault();const title=$('#quick-input').value.trim();if(!title)return;const tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+1);try{await api('/api/events',{method:'POST',body:JSON.stringify({subject:'기타',title,type:'과제',date:localISO(tomorrow),priority:'보통'})});$('#quick-input').value='';await refreshEvents();toast('빠른 할 일을 추가했습니다.');}catch(error){toast(error.message,true);}});
+$('#quick-form').addEventListener('submit',event=>{event.preventDefault();const title=$('#quick-input').value.trim();if(!title)return;const tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+1);state.events.push({id:crypto.randomUUID(),subject:'기타',title,type:'과제',date:localISO(tomorrow),priority:'보통',completed:false,createdAt:new Date().toISOString()});saveEvents();$('#quick-input').value='';render();toast('빠른 할 일을 추가했습니다.');});
 $('#view-all-deadlines').addEventListener('click',()=>{$('.nav-item[data-nav="urgent"]').click();});
 $('#timetable-button').addEventListener('click',()=>{$('.segment[data-view="week"]').click();$('#calendar').scrollIntoView({behavior:'smooth',block:'center'});});
 $('#sync-button').addEventListener('click',()=>toast('LMS 자동 연동은 MVP 범위에 포함되지 않습니다.'));
 
-loadApp().catch(()=>showAuth());
+loadApp();
